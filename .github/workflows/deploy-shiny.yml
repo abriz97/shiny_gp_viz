@@ -1,0 +1,19 @@
+on: [push, pull_request]
+
+name: deploy-shiny
+
+jobs:
+  deploy-shiny:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v2
+      - uses: r-lib/actions/setup-r@master
+      - name: Install shiny
+        run: |
+          install.packages(c("shiny", "rsconnect"), type = "binary")
+        shell: Rscript {0}
+      - name: shinyapps credentials
+        with:
+          rsconnect_secret: ${{ secrets.RSCONNECT }}
+        run: Rscript -e 'rsconnect::setAccountInfo(name="abriz97", token="989B7AD09DBDC3180C704A6AFF2795A4", secret="$rsconnect_secret")'
+        shell: Rscript {0}
