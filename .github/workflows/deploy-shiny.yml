@@ -15,5 +15,8 @@ jobs:
       - name: shinyapps credentials
         with:
           rsconnect_secret: ${{ secrets.RSCONNECT }}
-        run: Rscript -e 'rsconnect::setAccountInfo(name="abriz97", token="989B7AD09DBDC3180C704A6AFF2795A4", secret="$rsconnect_secret")'
-        shell: Rscript {0}
+      - name: Push to shiny.io
+        run: |
+          Rscript -e "rsconnect::setAccountInfo(name='abriz97', token=${{secrets.SHINYAPPS_TOKEN}}, secret=${{secrets.RSCONNECT}})"
+          Rscript -e "rsconnect::deployApp(appName = 'shiny_gp_viz')" 
+
