@@ -113,12 +113,13 @@ server <- function(input, output){
 
 }
 
-# Define UI for app
+# select a random bootstrap theme (for exploration)
+selected_theme <- sample(bslib::bootswatch_themes(), size=1 )
 
+# Define UI for app
 ui <- shinyUI(fluidPage(
 
-    theme = bslib::bs_theme(bootswatch="lux"),
-
+    theme = bslib::bs_theme(bootswatch=selected_theme),
 
     # App title ---
     titlePanel("GP hyperparameters visualisation"), 
@@ -184,7 +185,8 @@ ui <- shinyUI(fluidPage(
         mainPanel(
             width = 8,
 
-            p(" This webpage allows users to explore how Gaussian Processes are affected by their hyperparameters. This specific example is taken from my research: we want to model the probability of success for a bernoulli trials using only age as predictors (ranging from 15 to 50). We model this probablity of success as the inverse logit of a standard GP with mean mu and squared exponential kernel. This shiny app can be used for `prior predictive checks`, i.e. ..."), 
+            p(
+            " This webpage aims to provide intuitions on how functions sampled from Gaussian Processes are affected by their hyperparameters.\n One of the most common kernels is the squared exponential kernel, which is parametrised by the lengthscale (which I denote by the greek letter rho) and the marginal variance (denoted by alpha).\nI consider a slightly more complicated scenario whereby the function I want to model represents a probability of success, and hence has to lie in [0,1]. As such, we take an inverse logit to map the Gaussian Process samples to [0,1]. \n Happy exploration!"),
 
             tabsetPanel(
                 type = "tabs" , id="tabs1",
@@ -202,7 +204,9 @@ ui <- shinyUI(fluidPage(
                 ),
             )
         )
-    )
+    ),
     # main panel for displaying outputs
+
+    p(em(paste("The bootstrap theme used for this webpage is:", selected_theme)))
 ))
 shinyApp(ui=ui, server=server)
