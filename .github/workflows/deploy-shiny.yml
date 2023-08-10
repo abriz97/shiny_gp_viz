@@ -11,10 +11,8 @@ jobs:
       - name: Install shiny
         run: |
           install.packages(c("shiny", "rsconnect"), type = "binary")
+          install.packages(c("MASS", "invgamma", "data.table", "viridis", "ggplot2"))
         shell: Rscript {0}
-      - name: shinyapps credentials
-        with:
-          rsconnect_secret: ${{ secrets.RSCONNECT }}
       - name: Push to shiny.io
         run: |
           Rscript -e "rsconnect::setAccountInfo(name='abriz97', token=${{secrets.SHINYAPPS_TOKEN}}, secret=${{secrets.RSCONNECT}})"
