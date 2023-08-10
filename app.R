@@ -77,11 +77,8 @@ server <- function(input, output){
             theme_minimal() +
             labs(y="Inverse Gamma pdf")
     })
-
-
     output$gp_plot <- renderPlot({ realisations() })
     output$invgamma_pdf_plot <- renderPlot({ plot_inverse_gamma() })
-
 }
 
 # select a random bootstrap theme (for exploration)
