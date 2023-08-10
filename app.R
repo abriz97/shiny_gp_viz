@@ -4,81 +4,46 @@ library(shiny)
 # TODO:
 # Also include plot of prior
 # keep the same MVN(0, Id) draws as you vary the kernel! 
-
-.plot.range.alpha <- function(x_range = seq(-9, 9, by=.5), delta=1){
-
-    df_base <- data.table(
-        x = seq(-10,10, by=1/1000),
-        y = sapply(seq(-10, 10, by=1/1000), inverse.logit)
-    )
-    df <- data.table(
-        x = x_range,
-        y = sapply(x_range, inverse.logit),
-        ymin = sapply(x_range - delta/2, inverse.logit),
-        ymax = sapply(x_range + delta/2, inverse.logit)
-    )
-    ggplot(df_base, aes(x=x, y=y)) +
-        geom_line() +
-        geom_point(data=df) +
-        geom_linerange(data=df, aes(ymin=ymin, ymax=ymax, color=y)) + 
-        theme_minimal() + 
-        labs(y="inverse logit:\nexp(x)/(1+exp(x)) ")
-}
-
+source('helpers.R')
 
 # SHINY START
 
 # define server function
 
 server <- function(input, output){
-    require(ggplot2)
-    require(data.table)
-    require(invgamma)
-    require(MASS)
-    require(viridis)
 
-    inverse.logit <- function(x){
-        exp(x)/(1 + exp(x))
-    }
+    realisations <- reactive({
 
-    plot.inverse.gamma <- function(
-        rate = input$ig_rate, 
-        shape = input$ig_shape 
-    ){
-        x_range <- seq(0, 50, by = .05)
-        data.frame(
-            x=x_range,
-            y = invgamma::dinvgamma(x =x_range, rate=rate, shape=shape)
-        ) -> df
-        # subset to not to small values
-        df <- df[ df$y >= 1/10000 , ]
-        ggplot(df, aes(x=x, y=y)) + 
-            geom_line(color="darkred") + 
-            theme_minimal() +
-            labs(y="Inverse Gamma pdf")
-    }
+        x <- seq(15, 50, by=1); l <- length(x)
 
-
-    plot.gaussian.process.realisations <- function(
-        mu = input$mu,
-        alpha = input$alpha,
-        rho = input$rho,
-        n = input$n_realisations
-    ){
-
-        x <- seq(15, 50, by=.5); l <- length(x)
-
-        # squared exponential kernel:
-        kSE <- function(x1, x2){
-            alpha^2 * exp( -(x1-x2)^2 / (2*rho^2) )
+        # MVN(0,Id) which will be "transformed" to GP by kernel
+        if(0){
+            mvn_realisations <- MASS::mvrnorm(
+                n = input$n_realisations,
+                mu= rep(0, l),
+                Sigma=diag(l) |> as.matrix()
+            )
         }
-        Sigma <- lapply(x, kSE, x2=x) |> Reduce(f=rbind)
 
-        gp_realisation <- mvrnorm(n = n, mu= rep(0, l), Sigma=Sigma)
-        gp_realisation <- gp_realisation + mu
-        gp_realisation <- gp_realisation |> 
+        # get kernel (cholesky decompose it)
+        kSE <- function(x1, x2){
+            input$alpha^2 * exp( -(x1-x2)^2 / (2*input$rho^2) )
+        }
+        Sigma <- lapply(x, kSE, x2=x) |> 
+                Reduce(f=rbind)
+        if(0){
+            chol_Sigma <- chol(Sigma)
+            mvn_realisations <- chol_Sigma %*% t(mvn_realisations) + input$mu
+        }else{
+            mvn_realisations <- MASS::mvrnorm(
+                n = input$n_realisations,
+                mu = rep(input$mu, l),
+                Sigma = Sigma 
+            ) |> as.matrix()
+        }
+        gp_realisation <- mvn_realisations |> 
             inverse.logit() |>
-            as.data.frame.matrix() |> 
+            as.data.frame.matrix() |>
             as.data.table()
         names(gp_realisation) <- as.character(x)
 
@@ -91,25 +56,31 @@ server <- function(input, output){
             geom_line() +
             geom_label(data=data.frame(),
                 x=15.5, y=.95, color="black", group=NA,
-                label=paste0("Mu=", mu)) +
+                label=paste0("Mu=", input$mu)) +
             scale_y_continuous(
                 limits=c(0,1), labels=scales::percent) +
             scale_color_viridis_d()+
             labs(y="Gaussian Process realisations") +
             theme_bw() 
-    }
+    })
 
-    output$gp_plot <- renderPlot({
-        plot.gaussian.process.realisations(
-            mu = input$mu,
-            alpha = input$alpha,
-            rho = input$rho,
-            n = input$n_realisations
-        )
+    plot_inverse_gamma <- reactive({
+        x_range <- seq(0, 50, by = .05)
+        data.frame(
+            x=x_range,
+            y = invgamma::dinvgamma(x=x_range, rate=input$rate, shape=input$shape)
+        ) -> df
+        # subset to not to small values
+        df <- df[ df$y >= 1/10000 , ]
+        ggplot(df, aes(x=x, y=y)) + 
+            geom_line(color="darkred") + 
+            theme_minimal() +
+            labs(y="Inverse Gamma pdf")
     })
-    output$invgamma_pdf_plot <- renderPlot({
-        plot.inverse.gamma(rate = input$ig_rate, shape = input$ig_shape)
-    })
+
+
+    output$gp_plot <- renderPlot({ realisations() })
+    output$invgamma_pdf_plot <- renderPlot({ plot_inverse_gamma() })
 
 }
 
@@ -142,7 +113,7 @@ ui <- shinyUI(fluidPage(
                     inputId = "alpha",
                     label = "Marginal standard deviation alpha", 
                     min = .1,
-                    max = 5,
+                    max = 2,
                     value = 0.2
                 ),
 
@@ -186,7 +157,7 @@ ui <- shinyUI(fluidPage(
             width = 8,
 
             p(
-            " This webpage aims to provide intuitions on how functions sampled from Gaussian Processes are affected by their hyperparameters.\n One of the most common kernels is the squared exponential kernel, which is parametrised by the lengthscale (which I denote by the greek letter rho) and the marginal variance (denoted by alpha).\nI consider a slightly more complicated scenario whereby the function I want to model represents a probability of success, and hence has to lie in [0,1]. As such, we take an inverse logit to map the Gaussian Process samples to [0,1]. \n Happy exploration!"),
+            " This webpage aims to provide intuitions on how functions sampled from Gaussian Processes are affected by their hyperparameters", "\n One of the most common kernels is the squared exponential kernel, which is parametrised by the lengthscale (which I denote by the greek letter rho) and the marginal variance (denoted by alpha).\nI consider a slightly more complicated scenario whereby the function I want to model represents a probability of success, and hence has to lie in [0,1]. As such, we take an inverse logit to map the Gaussian Process samples to [0,1]. \n Happy exploration!"),
 
             tabsetPanel(
                 type = "tabs" , id="tabs1",
