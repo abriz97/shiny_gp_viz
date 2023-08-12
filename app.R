@@ -1,5 +1,6 @@
 # visualise how "big" inv logit with range 1 is
 library(shiny)
+options(rsconnect.packrat=TRUE)
 
 # TODO:
 # Also include plot of prior
@@ -12,11 +13,10 @@ source('helpers.R')
 
 server <- function(input, output){
 
-    realisations <- reactive({
+    gp_realisations <- reactive({
 
         x <- seq(15, 50, by=1); l <- length(x)
 
-        # MVN(0,Id) which will be "transformed" to GP by kernel
         if(0){
             mvn_realisations <- MASS::mvrnorm(
                 n = input$n_realisations,
@@ -51,8 +51,10 @@ server <- function(input, output){
         gp_realisation <- melt.data.table(gp_realisation,
             id.vars = "ID", variable.name="x", value.name="y") 
         gp_realisation[, x := as.numeric(x)]
+    })
 
-        ggplot(gp_realisation, aes(x=x, y=y, color=ID, group=ID)) + 
+    plot_gp <- reactive({
+        ggplot(gp_realisations(), aes(x=x, y=y, color=ID, group=ID)) + 
             geom_line() +
             geom_label(data=data.frame(),
                 x=15.5, y=.95, color="black", group=NA,
@@ -77,7 +79,8 @@ server <- function(input, output){
             theme_minimal() +
             labs(y="Inverse Gamma pdf")
     })
-    output$gp_plot <- renderPlot({ realisations() })
+
+    output$gp_plot <- renderPlot({ plot_gp() })
     output$invgamma_pdf_plot <- renderPlot({ plot_inverse_gamma() })
 }
 
@@ -178,3 +181,4 @@ ui <- shinyUI(fluidPage(
     p(em(paste("The bootstrap theme used for this webpage is:", selected_theme)))
 ))
 shinyApp(ui=ui, server=server)
+
