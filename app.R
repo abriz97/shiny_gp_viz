@@ -1,6 +1,7 @@
 # visualise how "big" inv logit with range 1 is
 library(shiny)
 options(rsconnect.packrat=TRUE)
+# else: remotes::install_version("rsconnect", "0.8.29")
 
 # TODO:
 # Also include plot of prior
