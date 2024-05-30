@@ -1,27 +1,92 @@
-# visualise how "big" inv logit with range 1 is
+# shiny::runApp("app.R")
 library(shiny)
+library(ggplot2)
+library(data.table)
+library(invgamma)
+library(MASS)
+library(viridis)
 
-# TODO:
-# Also include plot of prior
-# keep the same MVN(0, Id) draws as you vary the kernel!
+# plot.range.alpha <- function(x_range = seq(-9, 9, by = .5), delta = 1) {
+#     df_base <- data.table(
+#         x = seq(-10, 10, by = 1 / 1000),
+#         y = sapply(seq(-10, 10, by = 1 / 1000), inverse.logit)
+#     )
+#     df <- data.table(
+#         x = x_range,
+#         y = sapply(x_range, inverse.logit),
+#         ymin = sapply(x_range - delta / 2, inverse.logit),
+#         ymax = sapply(x_range + delta / 2, inverse.logit)
+#     )
+#     ggplot(df_base, aes(x = x, y = y)) +
+#         geom_line() +
+#         geom_point(data = df) +
+#         geom_linerange(data = df, aes(ymin = ymin, ymax = ymax, color = y)) +
+#         theme_minimal() +
+#         labs(y = "inverse logit:\nexp(x)/(1+exp(x)) ")
+# }
 
-.plot.range.alpha <- function(x_range = seq(-9, 9, by = .5), delta = 1) {
-    df_base <- data.table(
-        x = seq(-10, 10, by = 1 / 1000),
-        y = sapply(seq(-10, 10, by = 1 / 1000), inverse.logit)
-    )
-    df <- data.table(
+inverse.logit <- function(x) {
+    exp(x) / (1 + exp(x))
+}
+
+plot.inverse.gamma <- function(rate = input$ig_rate,
+                               shape = input$ig_shape) {
+    x_range <- seq(0.05, 50, by = .05)
+    df <- data.frame(
         x = x_range,
-        y = sapply(x_range, inverse.logit),
-        ymin = sapply(x_range - delta / 2, inverse.logit),
-        ymax = sapply(x_range + delta / 2, inverse.logit)
-    )
-    ggplot(df_base, aes(x = x, y = y)) +
-        geom_line() +
-        geom_point(data = df) +
-        geom_linerange(data = df, aes(ymin = ymin, ymax = ymax, color = y)) +
+        y = invgamma::dinvgamma(x = x_range, rate = rate, shape = shape)
+    ) 
+    # subset to not to small values
+    df <- df[df$y >= 1 / 10000, ]
+    ggplot(df, aes(x = x, y = y)) +
+        geom_line(color = "darkred") +
         theme_minimal() +
-        labs(y = "inverse logit:\nexp(x)/(1+exp(x)) ")
+        labs(y = "Inverse Gamma pdf")
+}
+
+choleski.decompose.SE <- function(alpha, rho, grid){
+    kSE <- function(x1, x2) {
+        alpha^2 * exp(-(x1 - x2)^2 / (2 * rho^2))
+    }
+    Sigma <- lapply(grid, kSE, x2 = grid) |> Reduce(f = rbind)
+    L <- chol(Sigma + 1e-6 * diag(nrow(Sigma)))
+    return(L)
+}
+
+draws.to.gp <- function(mu=input$mu, normal_draws=draws, L=L, grid){
+    # returns a data table of dimension (n_realisations, length(grid))
+    # each row is a single realisation of the Gaussian Process
+    gp_realisation <- lapply(normal_draws, function(z){
+        out <- z %*% L + mu 
+        as.data.table(out)
+    }) |> rbindlist()
+    names(gp_realisation) <- as.character(grid)
+    gp_realisation[, ID := as.factor(1:.N)]
+    gp_realisation <- melt.data.table(gp_realisation,
+        id.vars = "ID", variable.name = "x", value.name = "y"
+    )
+    gp_realisation[, x := as.numeric(x)]
+    return(gp_realisation)
+}
+
+plot.gaussian.process.realisations <- function(draws, mu, type="base", ylims=c(-5,5)){
+
+    # check args
+    type <- match.arg(type, c("base", "logit"))
+    scale_y <- if(type == "logit") scales::percent else scales::number
+
+    ggplot(draws, aes(x = x, y = y, color = ID, group = ID)) +
+        geom_line() +
+        geom_label(
+            data = data.frame(),
+            x = 15.5, y = .95, color = "black", group = NA,
+            label = paste0("Mu=", mu)
+        ) +
+        scale_y_continuous( limits = ylims, labels = scale_y) +
+        scale_color_viridis_d() +
+        labs(y = "Gaussian Process realisations") +
+        theme_bw()
+
 }
 
 
@@ -30,96 +95,65 @@ library(shiny)
 # define server function
 
 server <- function(input, output) {
-    require(ggplot2)
-    require(data.table)
-    require(invgamma)
-    require(MASS)
-    require(viridis)
 
-    inverse.logit <- function(x) {
-        exp(x) / (1 + exp(x))
-    }
+    grid <- seq(15, 50, by = .5)
 
-    plot.inverse.gamma <- function(rate = input$ig_rate,
-                                   shape = input$ig_shape) {
-        x_range <- seq(0, 50, by = .05)
-        data.frame(
-            x = x_range,
-            y = invgamma::dinvgamma(x = x_range, rate = rate, shape = shape)
-        ) -> df
-        # subset to not to small values
-        df <- df[df$y >= 1 / 10000, ]
-        ggplot(df, aes(x = x, y = y)) +
-            geom_line(color = "darkred") +
-            theme_minimal() +
-            labs(y = "Inverse Gamma pdf")
-    }
-
-
-    plot.gaussian.process.realisations <- function(mu = input$mu,
-                                                   alpha = input$alpha,
-                                                   rho = input$rho,
-                                                   n = input$n_realisations) {
-        x <- seq(15, 50, by = .5)
-        l <- length(x)
-
-        # squared exponential kernel:
-        kSE <- function(x1, x2) {
-            alpha^2 * exp(-(x1 - x2)^2 / (2 * rho^2))
-        }
-        Sigma <- lapply(x, kSE, x2 = x) |> Reduce(f = rbind)
-
-        gp_realisation <- mvrnorm(n = n, mu = rep(0, l), Sigma = Sigma)
-        gp_realisation <- gp_realisation + mu
-        gp_realisation <- gp_realisation |>
-            inverse.logit() |>
-            as.data.frame.matrix() |>
-            as.data.table()
-        names(gp_realisation) <- as.character(x)
-
-        gp_realisation[, ID := as.factor(1:.N)]
-        gp_realisation <- melt.data.table(gp_realisation,
-            id.vars = "ID", variable.name = "x", value.name = "y"
+    L <- reactive({
+        choleski.decompose.SE(
+            alpha=input$alpha,
+            rho=input$rho,
+            grid=grid
         )
-        gp_realisation[, x := as.numeric(x)]
+    })
 
-        ggplot(gp_realisation, aes(x = x, y = y, color = ID, group = ID)) +
-            geom_line() +
-            geom_label(
-                data = data.frame(),
-                x = 15.5, y = .95, color = "black", group = NA,
-                label = paste0("Mu=", mu)
-            ) +
-            scale_y_continuous(
-                limits = c(0, 1), labels = scales::percent
-            ) +
-            scale_color_viridis_d() +
-            labs(y = "Gaussian Process realisations") +
-            theme_bw()
-    }
+    draws <- reactive({ 
+        lapply(1:input$n_realisations, function(x) {
+            l <- length(grid)
+            rnorm(l)
+        })
+    })
+
+    realisations <- reactive({
+        draws.to.gp(mu = input$mu, normal_draws = draws(), L = L(), grid = grid)
+    })
+
+    realisations_logit <- reactive({
+        realisations()[, y := inverse.logit(y)]
+    })
 
     output$gp_plot <- renderPlot({
         plot.gaussian.process.realisations(
+            draws = realisations(),
             mu = input$mu,
-            alpha = input$alpha,
-            rho = input$rho,
-            n = input$n_realisations
+            type = "base",
+            ylims = c(-5,5)
         )
     })
+
+    output$gp_plot_logit <- renderPlot({
+        plot.gaussian.process.realisations(
+            draws = realisations_logit(),
+            mu = input$mu,
+            type = "logit",
+            ylims = c(0,1)
+        )
+    })
+
     output$invgamma_pdf_plot <- renderPlot({
         plot.inverse.gamma(rate = input$ig_rate, shape = input$ig_shape)
     })
 }
 
 # select a random bootstrap theme (for exploration)
-selected_theme <- sample(bslib::bootswatch_themes(), size = 1)
+# selected_theme <- sample(bslib::bootswatch_themes(), size = 1)
+selected_theme <- "lux"
 
 # Define UI for app
 ui <- shinyUI(fluidPage(
     theme = bslib::bs_theme(bootswatch = selected_theme),
 
     # App title ---
-    titlePanel("GP hyperparameters visualisation"),
+    titlePanel("GP visualisation: the Squared Exponential kernel."),
 
     # Sidebar anel for inputs ---
     sidebarLayout(
@@ -176,8 +210,10 @@ ui <- shinyUI(fluidPage(
         ),
         mainPanel(
             width = 8,
-            p(
-                " This webpage aims to provide intuitions on how functions sampled from Gaussian Processes are affected by their hyperparameters.\n One of the most common kernels is the squared exponential kernel, which is parametrised by the lengthscale (which I denote by the greek letter rho) and the marginal variance (denoted by alpha).\nI consider a slightly more complicated scenario whereby the function I want to model represents a probability of success, and hence has to lie in [0,1]. As such, we take an inverse logit to map the Gaussian Process samples to [0,1]. \n Happy exploration!"
+            p(" This webpage aims to provide intuitions on how functions sampled from Gaussian Processes are affected by their hyperparameters."),
+            p("One of the most common kernels is the squared exponential kernel, which is parametrised by the lengthscale (which I denote by the greek letter $rho$) and the marginal variance (denoted by $alpha$)."),
+            p("I consider a slightly more complicated scenario whereby the function I want to model represents a probability of success, and hence has to lie in [0,1]. As such, we take an inverse logit to map the Gaussian Process samples to [0,1]."),
+            p("Happy exploration!"
             ),
             tabsetPanel(
                 type = "tabs", id = "tabs1",
@@ -186,6 +222,12 @@ ui <- shinyUI(fluidPage(
                     id = "tab_gp_realisations",
                     title = "GP realisations",
                     plotOutput(outputId = "gp_plot")
+                ),
+                tabPanel(
+                    value = "gpreal",
+                    id = "tab_gp_realisations_logit",
+                    title = "logit(GP realisations)",
+                    plotOutput(outputId = "gp_plot_logit")
                 ),
                 tabPanel(
                     value = "igprior",
