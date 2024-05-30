@@ -2,6 +2,9 @@ library(shiny)
 options(rsconnect.packrat=TRUE)
 source('helpers.R')
 
+# jsonlite problem here
+# https://forum.posit.co/t/error-deploying-jsonlite-fails-to-build/186252
+
 server <- function(input, output) {
 
     grid <- seq(15, 50, by = .5)
