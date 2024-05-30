@@ -1,7 +1,6 @@
 library(ggplot2)
 library(data.table)
 library(invgamma)
-library(MASS)
 library(viridis)
 
 inverse.logit <- function(x) {
@@ -67,5 +66,3 @@ plot.gaussian.process.realisations <- function(draws, mu, type="base", ylims=c(-
         theme_bw()
 
 }
-
-
